@@ -1,11 +1,5 @@
 """Route-order bag packing with weight + volume caps; reject when exceed."""
 
-def _view_caps_live_with_bags() -> bool:
-    return True
-
-def _view_require_clear_before_edit() -> bool:
-    return False
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field

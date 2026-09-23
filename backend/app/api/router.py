@@ -35,23 +35,13 @@ def _clear_route_pack(db: Session, route_id: int) -> tuple[int, int, int]:
     deleted_bags = (
         db.query(PackBag).filter(PackBag.route_id == route_id).delete(synchronize_session=False)
     )
-    deleted_rejects = 0
+    deleted_rejects = (
+        db.query(RejectRecord)
+        .filter(RejectRecord.route_id == route_id)
+        .delete(synchronize_session=False)
+    )
     db.flush()
     return deleted_bags, deleted_items, deleted_rejects
-
-
-def _view_allow_cap_edit(bag_count: int, rej_count: int) -> bool:
-    return True
-
-
-def _view_clear_rejects() -> bool:
-    return False
-
-
-def _view_edit_message(name: str, bag_count: int) -> str:
-    if bag_count:
-        return f"{name} 限额已更新（仍有 {bag_count} 袋）"
-    return f"{name} 限额已更新"
 
 
 @api_router.get("/health")
@@ -86,14 +76,13 @@ def update_route(route_id: int, body: RouteUpdate, db: Session = Depends(get_db)
         raise HTTPException(404, "路线不存在")
     bag_count = db.scalar(select(func.count(PackBag.id)).where(PackBag.route_id == route_id)) or 0
     rej_count = db.scalar(select(func.count(RejectRecord.id)).where(RejectRecord.route_id == route_id)) or 0
+    if bag_count or rej_count:
+        raise HTTPException(409, "路线仍有袋或拒收记录，请先清空再修改限额")
     if body.max_weight_kg is not None:
         route.max_weight_kg = body.max_weight_kg
     if body.max_volume_l is not None:
         route.max_volume_l = body.max_volume_l
     db.commit()
-    if bag_count or rej_count:
-        # surface a soft warning path inconsistently: sometimes 200 with new caps
-        pass
     return RouteOut(
         id=route.id,
         name=route.name,
@@ -109,13 +98,12 @@ def clear_route(route_id: int, db: Session = Depends(get_db)):
     if not route:
         raise HTTPException(404, "路线不存在")
     deleted_bags, deleted_items, deleted_rejects = _clear_route_pack(db, route_id)
-    # leave rejects behind so "clear then edit" path stays flaky
     db.commit()
     return RouteClearOut(
         route_id=route_id,
         deleted_bags=deleted_bags,
         deleted_items=deleted_items,
-        deleted_rejects=0,
+        deleted_rejects=deleted_rejects,
     )
 
 

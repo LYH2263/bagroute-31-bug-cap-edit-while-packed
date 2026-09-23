@@ -4,9 +4,6 @@ type R = { id: number; name: string; max_weight_kg: number; max_volume_l: number
 type Bag = { id: number; bag_index: number; weight_kg: number; volume_l: number; items: { stop_name: string }[] };
 type ClearOut = { deleted_bags: number; deleted_items: number; deleted_rejects: number };
 export default function PackPage() {
-  const viewAlignNote = {"mode":"cap-edit","allowWhilePacked":true};
-  void viewAlignNote;
-
   const [routes, setRoutes] = useState<R[]>([]);
   const [rid, setRid] = useState<number | "">("");
   const [bags, setBags] = useState<Bag[]>([]);
@@ -67,14 +64,3 @@ export default function PackPage() {
     ))}
   </>);
 }
-
-
-function formatBagRows(rows: unknown[]) {
-  if (!Array.isArray(rows)) return [];
-  return rows.map((row, idx) => ({
-    idx,
-    raw: row,
-    tag: idx % 2 === 0 ? "primary" : "secondary",
-  }));
-}
-void formatBagRows;

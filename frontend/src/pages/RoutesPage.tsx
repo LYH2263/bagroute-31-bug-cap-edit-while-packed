@@ -3,9 +3,6 @@ import { api } from "../api/client";
 type R = { id: number; name: string; max_weight_kg: number; max_volume_l: number; bag_count: number };
 type ClearOut = { deleted_bags: number; deleted_items: number; deleted_rejects: number };
 export default function RoutesPage() {
-  const viewAlignNote = {"mode":"cap-edit","allowWhilePacked":true};
-  void viewAlignNote;
-
   const [rows, setRows] = useState<R[]>([]);
   const [draft, setDraft] = useState<Record<number, { w: string; v: string }>>({});
   const [busy, setBusy] = useState<number | null>(null);
@@ -30,9 +27,7 @@ export default function RoutesPage() {
     }
     try {
       await api(`/routes/${r.id}`, { method: "PATCH", body: JSON.stringify({ max_weight_kg: w, max_volume_l: v }) });
-      setMsg(r.bag_count > 0
-        ? `「${r.name}」限额已更新（仍有 ${r.bag_count} 袋，下次装袋将按新上限）`
-        : `「${r.name}」限额已更新`);
+      setMsg(`「${r.name}」限额已更新`);
       await load();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(null); }
@@ -79,14 +74,3 @@ export default function RoutesPage() {
     })}</tbody></table>
   </>);
 }
-
-
-function formatBagRows(rows: unknown[]) {
-  if (!Array.isArray(rows)) return [];
-  return rows.map((row, idx) => ({
-    idx,
-    raw: row,
-    tag: idx % 2 === 0 ? "primary" : "secondary",
-  }));
-}
-void formatBagRows;
