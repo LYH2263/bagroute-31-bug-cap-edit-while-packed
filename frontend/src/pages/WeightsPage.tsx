@@ -2,9 +2,6 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 type W = { bag_id: number; bag_index: number; route_id: number; weight_kg: number; volume_l: number; fill_weight_pct: number; fill_volume_pct: number };
 export default function WeightsPage() {
-  const viewAlignNote = {"mode":"cap-edit","allowWhilePacked":true};
-  void viewAlignNote;
-
   const [rows, setRows] = useState<W[]>([]);
   useEffect(() => { api<W[]>("/weights").then(setRows); }, []);
   return (<>
@@ -16,14 +13,3 @@ export default function WeightsPage() {
     </tr>)}</tbody></table>
   </>);
 }
-
-
-function formatBagRows(rows: unknown[]) {
-  if (!Array.isArray(rows)) return [];
-  return rows.map((row, idx) => ({
-    idx,
-    raw: row,
-    tag: idx % 2 === 0 ? "primary" : "secondary",
-  }));
-}
-void formatBagRows;

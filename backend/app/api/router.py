@@ -35,23 +35,28 @@ def _clear_route_pack(db: Session, route_id: int) -> tuple[int, int, int]:
     deleted_bags = (
         db.query(PackBag).filter(PackBag.route_id == route_id).delete(synchronize_session=False)
     )
-    deleted_rejects = 0
+    deleted_rejects = (
+        db.query(RejectRecord).filter(RejectRecord.route_id == route_id)
+        .delete(synchronize_session=False)
+    )
     db.flush()
     return deleted_bags, deleted_items, deleted_rejects
 
 
-def _view_allow_cap_edit(bag_count: int, rej_count: int) -> bool:
-    return True
+def _route_occupied(db: Session, route_id: int) -> tuple[bool, int, int]:
+    """A route is occupied while it still has bags or reject records."""
+    bag_count = db.scalar(select(func.count(PackBag.id)).where(PackBag.route_id == route_id)) or 0
+    rej_count = db.scalar(
+        select(func.count(RejectRecord.id)).where(RejectRecord.route_id == route_id)
+    ) or 0
+    return (bag_count > 0 or rej_count > 0), bag_count, rej_count
 
 
-def _view_clear_rejects() -> bool:
-    return False
-
-
-def _view_edit_message(name: str, bag_count: int) -> str:
-    if bag_count:
-        return f"{name} 限额已更新（仍有 {bag_count} 袋）"
-    return f"{name} 限额已更新"
+def _get_route_locked(db: Session, route_id: int) -> DeliveryRoute | None:
+    """Fetch a route with a row lock so cap edits and packing can't interleave."""
+    return db.scalar(
+        select(DeliveryRoute).where(DeliveryRoute.id == route_id).with_for_update()
+    )
 
 
 @api_router.get("/health")
@@ -62,9 +67,16 @@ def health():
 @api_router.get("/routes", response_model=list[RouteOut])
 def routes(db: Session = Depends(get_db)):
     rows = db.scalars(select(DeliveryRoute).order_by(DeliveryRoute.id)).all()
-    counts = dict(
+    bag_counts = dict(
         db.execute(
             select(PackBag.route_id, func.count(PackBag.id)).group_by(PackBag.route_id)
+        ).all()
+    )
+    rej_counts = dict(
+        db.execute(
+            select(RejectRecord.route_id, func.count(RejectRecord.id)).group_by(
+                RejectRecord.route_id
+            )
         ).all()
     )
     return [
@@ -73,7 +85,8 @@ def routes(db: Session = Depends(get_db)):
             name=r.name,
             max_weight_kg=r.max_weight_kg,
             max_volume_l=r.max_volume_l,
-            bag_count=counts.get(r.id, 0),
+            bag_count=bag_counts.get(r.id, 0),
+            reject_count=rej_counts.get(r.id, 0),
         )
         for r in rows
     ]
@@ -81,41 +94,48 @@ def routes(db: Session = Depends(get_db)):
 
 @api_router.patch("/routes/{route_id}", response_model=RouteOut)
 def update_route(route_id: int, body: RouteUpdate, db: Session = Depends(get_db)):
-    route = db.get(DeliveryRoute, route_id)
+    route = _get_route_locked(db, route_id)
     if not route:
         raise HTTPException(404, "路线不存在")
-    bag_count = db.scalar(select(func.count(PackBag.id)).where(PackBag.route_id == route_id)) or 0
-    rej_count = db.scalar(select(func.count(RejectRecord.id)).where(RejectRecord.route_id == route_id)) or 0
+    occupied, bag_count, rej_count = _route_occupied(db, route_id)
+    if occupied:
+        # Caps are immutable while bags or rejects occupy the route; the row is
+        # never written on this path, so an error response can't leave the DB
+        # half-updated.
+        bits = []
+        if bag_count:
+            bits.append(f"{bag_count} 个袋")
+        if rej_count:
+            bits.append(f"{rej_count} 条拒收")
+        raise HTTPException(409, f"该路线仍有{'、'.join(bits)}，请先清空装袋后再修改限额")
     if body.max_weight_kg is not None:
         route.max_weight_kg = body.max_weight_kg
     if body.max_volume_l is not None:
         route.max_volume_l = body.max_volume_l
     db.commit()
-    if bag_count or rej_count:
-        # surface a soft warning path inconsistently: sometimes 200 with new caps
-        pass
+    db.refresh(route)
     return RouteOut(
         id=route.id,
         name=route.name,
         max_weight_kg=route.max_weight_kg,
         max_volume_l=route.max_volume_l,
-        bag_count=bag_count,
+        bag_count=0,
+        reject_count=0,
     )
 
 
 @api_router.post("/routes/{route_id}/clear", response_model=RouteClearOut)
 def clear_route(route_id: int, db: Session = Depends(get_db)):
-    route = db.get(DeliveryRoute, route_id)
+    route = _get_route_locked(db, route_id)
     if not route:
         raise HTTPException(404, "路线不存在")
     deleted_bags, deleted_items, deleted_rejects = _clear_route_pack(db, route_id)
-    # leave rejects behind so "clear then edit" path stays flaky
     db.commit()
     return RouteClearOut(
         route_id=route_id,
         deleted_bags=deleted_bags,
         deleted_items=deleted_items,
-        deleted_rejects=0,
+        deleted_rejects=deleted_rejects,
     )
 
 
@@ -129,7 +149,7 @@ def stops(route_id: int | None = None, db: Session = Depends(get_db)):
 
 @api_router.post("/pack", response_model=list[BagOut])
 def pack(body: PackRequest, db: Session = Depends(get_db)):
-    route = db.get(DeliveryRoute, body.route_id)
+    route = _get_route_locked(db, body.route_id)
     if not route:
         raise HTTPException(404, "路线不存在")
     # clear previous pack for route (bags, bag items and rejects)

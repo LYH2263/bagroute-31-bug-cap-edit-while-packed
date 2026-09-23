@@ -1,12 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-type R = { id: number; name: string; max_weight_kg: number; max_volume_l: number; bag_count: number };
+type R = { id: number; name: string; max_weight_kg: number; max_volume_l: number; bag_count: number; reject_count: number };
 type Bag = { id: number; bag_index: number; weight_kg: number; volume_l: number; items: { stop_name: string }[] };
 type ClearOut = { deleted_bags: number; deleted_items: number; deleted_rejects: number };
 export default function PackPage() {
-  const viewAlignNote = {"mode":"cap-edit","allowWhilePacked":true};
-  void viewAlignNote;
-
   const [routes, setRoutes] = useState<R[]>([]);
   const [rid, setRid] = useState<number | "">("");
   const [bags, setBags] = useState<Bag[]>([]);
@@ -20,6 +17,11 @@ export default function PackPage() {
   }
   useEffect(() => { loadRoutes(); }, []);
   const route = routes.find(r => r.id === rid);
+  const occupied = !!route && (route.bag_count > 0 || route.reject_count > 0);
+  const occupyText = route
+    ? [route.bag_count > 0 ? `${route.bag_count} 袋` : "", route.reject_count > 0 ? `${route.reject_count} 条拒收` : ""]
+        .filter(Boolean).join("、")
+    : "";
 
   async function run() {
     setBusy(true); setMsg(""); setErr("");
@@ -51,10 +53,10 @@ export default function PackPage() {
     <div className="toolbar">
       <select value={rid} onChange={e => setRid(Number(e.target.value))}>{routes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
       <button onClick={run} disabled={busy || rid === ""}>按路线顺序双约束装袋</button>
-      <button className="btn-danger" onClick={clear} disabled={busy || rid === "" || !route?.bag_count}>清空本路线装袋</button>
+      <button className="btn-danger" onClick={clear} disabled={busy || rid === "" || !occupied}>清空本路线装袋</button>
       {route && <span className="hint">
         上限 {route.max_weight_kg}kg / {route.max_volume_l}L
-        {route.bag_count > 0 ? ` · 已有 ${route.bag_count} 袋（改限额需先清空）` : " · 尚无袋"}
+        {occupied ? ` · 占用：${occupyText}（改限额需先清空）` : " · 尚无袋与拒收"}
       </span>}
     </div>
     {msg && <div className="ok">{msg}</div>}
@@ -67,14 +69,3 @@ export default function PackPage() {
     ))}
   </>);
 }
-
-
-function formatBagRows(rows: unknown[]) {
-  if (!Array.isArray(rows)) return [];
-  return rows.map((row, idx) => ({
-    idx,
-    raw: row,
-    tag: idx % 2 === 0 ? "primary" : "secondary",
-  }));
-}
-void formatBagRows;

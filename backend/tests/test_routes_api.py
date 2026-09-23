@@ -77,6 +77,41 @@ def test_update_limit_fails_while_bags_exist(ctx):
         assert route.max_weight_kg == 8.0
 
 
+def test_update_limit_fails_while_rejects_exist_without_bags(ctx):
+    client, Session = ctx
+    with Session() as db:
+        rid = _make_route(
+            db,
+            "仅拒收无袋线",
+            [("超大件甲", 9.5, 6.0), ("超大件乙", 9.0, 19.0)],
+        )
+
+    packed = client.post("/api/pack", json={"route_id": rid})
+    assert packed.status_code == 200
+    assert packed.json() == []
+    assert len(client.get("/api/rejects").json()) == 2
+
+    routes = {r["id"]: r for r in client.get("/api/routes").json()}
+    assert routes[rid]["bag_count"] == 0
+    assert routes[rid]["reject_count"] == 2
+
+    resp = client.patch(f"/api/routes/{rid}", json={"max_weight_kg": 20.0})
+    assert resp.status_code == 409
+    assert "先清空" in resp.json()["detail"]
+
+    with Session() as db:
+        route = db.get(DeliveryRoute, rid)
+        assert route.max_weight_kg == 8.0
+
+    cleared = client.post(f"/api/routes/{rid}/clear").json()
+    assert cleared["deleted_rejects"] == 2
+    assert client.get("/api/rejects").json() == []
+
+    upd = client.patch(f"/api/routes/{rid}", json={"max_weight_kg": 20.0})
+    assert upd.status_code == 200
+    assert upd.json()["reject_count"] == 0
+
+
 def test_clear_removes_bags_items_rejects_then_update_succeeds(ctx):
     client, Session = ctx
     with Session() as db:

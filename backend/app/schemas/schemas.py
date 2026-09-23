@@ -13,6 +13,7 @@ class RouteOut(BaseModel):
     max_weight_kg: float
     max_volume_l: float
     bag_count: int = 0
+    reject_count: int = 0
     model_config = {"from_attributes": True}
 
 
